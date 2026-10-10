@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "tenants", uniqueConstraints = {
@@ -28,12 +29,17 @@ public class Tenant {
   @Column(name = "mobile_number", nullable = false, unique = true)
   private String mobileNumber;
 
-  @Column(nullable = false, unique = true, length = 150)
+  @Column(name = "email", unique = true, length = 150)
   private String email;
-  
+
+  @Column(name = "joining_date", nullable = false)
   private LocalDate joiningDate;
 
+  @Column(name = "created_at", updatable = false)
+  private LocalDateTime createdAt;
+
   @Enumerated(EnumType.STRING)
+  @Column(nullable = false)
   private TenantStatus tenantStatus;
 
   @ManyToOne(fetch = FetchType.LAZY)

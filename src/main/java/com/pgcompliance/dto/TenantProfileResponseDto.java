@@ -18,6 +18,8 @@ public class TenantProfileResponseDto {
 
   private String email;
 
+  private String roomType;
+  
   private LocalDate joiningDate;
 
   private TenantStatus tenantStatus;

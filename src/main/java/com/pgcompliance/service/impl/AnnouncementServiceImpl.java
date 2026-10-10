@@ -35,43 +35,102 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     @Transactional(readOnly = true)
-    public AnnouncementPreviewResponseDto preview(AnnouncementPreviewRequestDto request) {
-        List<Tenant> tenants = activeTenants();
-        boolean wantsInApp = request.getChannels().contains(CommunicationChannel.IN_APP);
-        boolean wantsEmail = request.getChannels().contains(CommunicationChannel.EMAIL);
+    public AnnouncementPreviewResponseDto preview(
+            AnnouncementPreviewRequestDto request) {
 
-        long inAppEligible = 0;
-        long emailEligible = 0;
+        List<Tenant> tenants = activeTenants();
+
+        boolean wantsInApp = request.getChannels().contains(
+                CommunicationChannel.IN_APP);
+
+        boolean wantsEmail = request.getChannels().contains(
+                CommunicationChannel.EMAIL);
+
+        long portalAccountTenantCount = 0;
+        long eligibleTenantCount = 0;
+        long inAppEligibleCount = 0;
+        long emailEligibleCount = 0;
+        long tenantsWithoutPortalAccount = 0;
 
         for (Tenant tenant : tenants) {
-            Optional<User> linkedUser = userRepository.findByTenantTenantId(tenant.getTenantId());
-            if (wantsInApp && linkedUser.filter(user -> Boolean.TRUE.equals(user.getActive())).isPresent()) {
-                inAppEligible++;
+
+            Optional<User> linkedUser = userRepository
+                    .findByTenantTenantId(
+                            tenant.getTenantId());
+
+            if (linkedUser.isEmpty()) {
+
+                tenantsWithoutPortalAccount++;
+                continue;
             }
-            if (wantsEmail && linkedUser.filter(user ->
-                    Boolean.TRUE.equals(user.getActive())
-                            && Boolean.TRUE.equals(user.getEmailVerified())
-                            && tenant.getEmail() != null
-                            && !tenant.getEmail().isBlank()
-            ).isPresent()) {
-                emailEligible++;
+
+            portalAccountTenantCount++;
+
+            User user = linkedUser.get();
+
+            boolean portalActive = Boolean.TRUE.equals(
+                    user.getActive());
+
+            boolean verifiedEmailAvailable = portalActive
+                    && Boolean.TRUE.equals(
+                            user.getEmailVerified())
+                    && tenant.getEmail() != null
+                    && !tenant.getEmail().isBlank();
+
+            boolean inAppEligible = wantsInApp
+                    && portalActive;
+
+            boolean emailEligible = wantsEmail
+                    && verifiedEmailAvailable;
+
+            if (inAppEligible) {
+                inAppEligibleCount++;
+            }
+
+            if (emailEligible) {
+                emailEligibleCount++;
+            }
+
+            /*
+             * Count the Tenant once when at least one selected
+             * channel can be delivered.
+             */
+            if (inAppEligible || emailEligible) {
+                eligibleTenantCount++;
             }
         }
 
-        return AnnouncementPreviewResponseDto.builder()
-                .activeTenantCount(tenants.size())
-                .inAppEligibleCount(inAppEligible)
-                .emailEligibleCount(emailEligible)
-                .inAppSkippedCount(wantsInApp ? tenants.size() - inAppEligible : 0)
-                .emailSkippedCount(wantsEmail ? tenants.size() - emailEligible : 0)
+        return AnnouncementPreviewResponseDto
+                .builder()
+                .activeTenantCount(
+                        tenants.size())
+                .portalAccountTenantCount(
+                        portalAccountTenantCount)
+                .eligibleTenantCount(
+                        eligibleTenantCount)
+                .inAppEligibleCount(
+                        inAppEligibleCount)
+                .emailEligibleCount(
+                        emailEligibleCount)
+                .inAppSkippedCount(
+                        wantsInApp
+                                ? tenants.size()
+                                        - inAppEligibleCount
+                                : 0)
+                .emailSkippedCount(
+                        wantsEmail
+                                ? tenants.size()
+                                        - emailEligibleCount
+                                : 0)
+                .tenantsWithoutPortalAccount(
+                        tenantsWithoutPortalAccount)
                 .build();
     }
 
     @Override
     public AnnouncementResponseDto send(
             AnnouncementCreateRequestDto request,
-            String adminUsername
-    ) {
+            String adminUsername) {
         User admin = userRepository.findByUsername(adminUsername)
                 .orElseThrow(() -> new ResourceNotFoundException("Admin account not found"));
 
@@ -103,16 +162,22 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
             if (Boolean.TRUE.equals(announcement.getSendInApp())) {
                 CommunicationDeliveryStatus result = sendInApp(announcement, tenant, linkedUser.orElse(null));
-                if (result == CommunicationDeliveryStatus.SENT) sent++;
-                else if (result == CommunicationDeliveryStatus.FAILED) failed++;
-                else skipped++;
+                if (result == CommunicationDeliveryStatus.SENT)
+                    sent++;
+                else if (result == CommunicationDeliveryStatus.FAILED)
+                    failed++;
+                else
+                    skipped++;
             }
 
             if (Boolean.TRUE.equals(announcement.getSendEmail())) {
                 CommunicationDeliveryStatus result = sendEmail(announcement, tenant, linkedUser.orElse(null));
-                if (result == CommunicationDeliveryStatus.SENT) sent++;
-                else if (result == CommunicationDeliveryStatus.FAILED) failed++;
-                else skipped++;
+                if (result == CommunicationDeliveryStatus.SENT)
+                    sent++;
+                else if (result == CommunicationDeliveryStatus.FAILED)
+                    failed++;
+                else
+                    skipped++;
             }
         }
 
@@ -146,8 +211,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private CommunicationDeliveryStatus sendInApp(
             Announcement announcement,
             Tenant tenant,
-            User user
-    ) {
+            User user) {
         if (user == null || !Boolean.TRUE.equals(user.getActive())) {
             saveDelivery(announcement, tenant, user, CommunicationChannel.IN_APP,
                     CommunicationDeliveryStatus.SKIPPED,
@@ -166,8 +230,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                     announcement.getDeepLink(),
                     "ANNOUNCEMENT",
                     announcement.getAnnouncementId(),
-                    "ADMIN_ANNOUNCEMENT:" + announcement.getAnnouncementId() + ":" + user.getUserId()
-            );
+                    "ADMIN_ANNOUNCEMENT:" + announcement.getAnnouncementId() + ":" + user.getUserId());
             saveDelivery(announcement, tenant, user, CommunicationChannel.IN_APP,
                     CommunicationDeliveryStatus.SENT, null);
             return CommunicationDeliveryStatus.SENT;
@@ -181,8 +244,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private CommunicationDeliveryStatus sendEmail(
             Announcement announcement,
             Tenant tenant,
-            User user
-    ) {
+            User user) {
         if (user == null
                 || !Boolean.TRUE.equals(user.getActive())
                 || !Boolean.TRUE.equals(user.getEmailVerified())
@@ -229,8 +291,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             User user,
             CommunicationChannel channel,
             CommunicationDeliveryStatus status,
-            String reason
-    ) {
+            String reason) {
         LocalDateTime now = LocalDateTime.now();
         deliveryRepository.save(AnnouncementDelivery.builder()
                 .announcement(announcement)
@@ -258,8 +319,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     private AnnouncementStatus resolveStatus(int sent, int failed, int skipped) {
-        if (sent == 0 && failed > 0) return AnnouncementStatus.FAILED;
-        if (failed > 0 || skipped > 0) return AnnouncementStatus.PARTIALLY_FAILED;
+        if (sent == 0 && failed > 0)
+            return AnnouncementStatus.FAILED;
+        if (failed > 0 || skipped > 0)
+            return AnnouncementStatus.PARTIALLY_FAILED;
         return AnnouncementStatus.COMPLETED;
     }
 
@@ -272,7 +335,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     private String normalizeDeepLink(String value) {
-        if (value == null || value.isBlank()) return "/tenant/dashboard";
+        if (value == null || value.isBlank())
+            return "/tenant/dashboard";
         String normalized = value.trim();
         if (!normalized.startsWith("/")) {
             throw new IllegalStateException("Deep link must start with /");
@@ -282,7 +346,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     private String safeReason(Exception exception) {
         String message = exception.getMessage();
-        if (message == null || message.isBlank()) return "Delivery failed";
+        if (message == null || message.isBlank())
+            return "Delivery failed";
         return message.length() > 500 ? message.substring(0, 500) : message;
     }
 

@@ -1,10 +1,6 @@
 package com.pgcompliance.service.impl;
 
-import com.pgcompliance.constant.NotificationEventType;
-import com.pgcompliance.constant.NotificationSeverity;
-import com.pgcompliance.constant.RoomStatus;
 import com.pgcompliance.constant.SharingType;
-import com.pgcompliance.constant.UserRole;
 import com.pgcompliance.dto.RoomRequestDto;
 import com.pgcompliance.dto.RoomResponseDto;
 import com.pgcompliance.entity.Building;
@@ -13,8 +9,6 @@ import com.pgcompliance.exception.ResourceNotFoundException;
 import com.pgcompliance.repository.BuildingRepository;
 import com.pgcompliance.repository.RoomRepository;
 import com.pgcompliance.repository.TenantRepository;
-import com.pgcompliance.repository.UserRepository;
-import com.pgcompliance.service.NotificationService;
 import com.pgcompliance.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,235 +21,143 @@ import java.util.List;
 @RequiredArgsConstructor
 public class RoomServiceImpl implements RoomService {
 
-    private final RoomRepository roomRepository;
-    private final BuildingRepository buildingRepository;
-    private final TenantRepository tenantRepository;
-    private final UserRepository userRepository;
-    private final NotificationService notificationService;
+        private final RoomRepository roomRepository;
+        private final BuildingRepository buildingRepository;
+        private final TenantRepository tenantRepository;
 
-    @Override
-    @Transactional
-    public RoomResponseDto createRoom(RoomRequestDto request) {
-        Building building = buildingRepository
-                .findById(request.getBuildingId())
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Building not found"
-                        )
-                );
+        @Override
+        @Transactional
+        public RoomResponseDto createRoom(RoomRequestDto request) {
+                Building building = buildingRepository
+                                .findById(request.getBuildingId())
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Building not found with id: "
+                                                                + request.getBuildingId()));
 
-        if (roomRepository
-                .existsByBuildingBuildingIdAndRoomNumber(
-                        request.getBuildingId(),
-                        request.getRoomNumber()
-                )) {
-            throw new IllegalStateException(
-                    "Room already exists in building"
-            );
+                if (roomRepository.existsByBuildingBuildingIdAndRoomNumber(
+                                request.getBuildingId(),
+                                request.getRoomNumber())) {
+                        throw new IllegalStateException(
+                                        "Room already exists in building");
+                }
+
+                Room room = Room.builder()
+                                .roomNumber(request.getRoomNumber())
+                                .sharingType(request.getSharingType())
+                                .roomType(request.getRoomType())
+                                .roomStatus(request.getRoomStatus())
+                                .building(building)
+                                .createdAt(LocalDateTime.now())
+                                .build();
+
+                return mapToResponse(roomRepository.save(room));
         }
 
-        Room room = Room.builder()
-                .roomNumber(request.getRoomNumber())
-                .sharingType(request.getSharingType())
-                .roomStatus(request.getRoomStatus())
-                .building(building)
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        Room savedRoom = roomRepository.save(room);
-
-        if (savedRoom.getRoomStatus()
-                == RoomStatus.UNDER_REPAIR) {
-            notifyActiveAdmins(
-                    NotificationEventType.ROOM_UNDER_REPAIR,
-                    NotificationSeverity.WARNING,
-                    "Room placed under repair",
-                    roomDescription(savedRoom)
-                            + " has been placed under repair.",
-                    savedRoom,
-                    "ROOM_UNDER_REPAIR:"
-                            + savedRoom.getRoomId()
-                            + ":"
-                            + System.currentTimeMillis()
-            );
+        @Override
+        @Transactional(readOnly = true)
+        public List<RoomResponseDto> getAllRooms() {
+                return roomRepository
+                                .findAllByOrderByBuildingBuildingIdAscRoomNumberAsc()
+                                .stream()
+                                .map(this::mapToResponse)
+                                .toList();
         }
 
-        return mapToResponse(savedRoom);
-    }
+        @Override
+        @Transactional(readOnly = true)
+        public RoomResponseDto getRoomById(Long roomId) {
+                Room room = roomRepository.findById(roomId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Room not found with id: " + roomId));
 
-    @Override
-    @Transactional(readOnly = true)
-    public List<RoomResponseDto> getAllRooms() {
-        return roomRepository.findAll()
-                .stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public RoomResponseDto getRoomById(Long roomId) {
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Room not found"
-                        )
-                );
-
-        return mapToResponse(room);
-    }
-
-    @Override
-    @Transactional
-    public RoomResponseDto updateRoom(
-            Long roomId,
-            RoomRequestDto request
-    ) {
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Room not found"
-                        )
-                );
-
-        if (!room.getBuilding().getBuildingId()
-                .equals(request.getBuildingId())) {
-            Building requestedBuilding = buildingRepository
-                    .findById(request.getBuildingId())
-                    .orElseThrow(() ->
-                            new ResourceNotFoundException(
-                                    "Building not found"
-                            )
-                    );
-            room.setBuilding(requestedBuilding);
+                return mapToResponse(room);
         }
 
-        boolean duplicateRoomNumber = roomRepository
-                .existsByBuildingBuildingIdAndRoomNumber(
-                        request.getBuildingId(),
-                        request.getRoomNumber()
-                )
-                && !room.getRoomNumber()
-                .equals(request.getRoomNumber());
+        @Override
+        @Transactional
+        public RoomResponseDto updateRoom(
+                        Long roomId,
+                        RoomRequestDto request) {
+                Room room = roomRepository.findById(roomId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Room not found with id: " + roomId));
 
-        if (duplicateRoomNumber) {
-            throw new IllegalStateException(
-                    "Room already exists in building"
-            );
+                Long requestedBuildingId = request.getBuildingId();
+                Long currentBuildingId = room.getBuilding().getBuildingId();
+
+                if (!currentBuildingId.equals(requestedBuildingId)) {
+                        Building requestedBuilding = buildingRepository
+                                        .findById(requestedBuildingId)
+                                        .orElseThrow(() -> new ResourceNotFoundException(
+                                                        "Building not found with id: "
+                                                                        + requestedBuildingId));
+                        room.setBuilding(requestedBuilding);
+                }
+
+                boolean roomIdentityChanged = !currentBuildingId.equals(requestedBuildingId)
+                                || !room.getRoomNumber()
+                                                .equals(request.getRoomNumber());
+
+                if (roomIdentityChanged
+                                && roomRepository
+                                                .existsByBuildingBuildingIdAndRoomNumber(
+                                                                requestedBuildingId,
+                                                                request.getRoomNumber())) {
+                        throw new IllegalStateException(
+                                        "Room already exists in building");
+                }
+
+                room.setRoomNumber(request.getRoomNumber());
+                room.setSharingType(request.getSharingType());
+                room.setRoomType(request.getRoomType());
+                room.setRoomStatus(request.getRoomStatus());
+
+                return mapToResponse(roomRepository.save(room));
         }
 
-        RoomStatus previousStatus = room.getRoomStatus();
+        @Override
+        @Transactional
+        public void deleteRoom(Long roomId) {
+                Room room = roomRepository.findById(roomId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Room not found with id: " + roomId));
 
-        room.setRoomNumber(request.getRoomNumber());
-        room.setSharingType(request.getSharingType());
-        room.setRoomStatus(request.getRoomStatus());
+                if (tenantRepository.countByRoomRoomId(roomId) > 0) {
+                        throw new IllegalStateException(
+                                        "Cannot delete room. Tenants are assigned to this room.");
+                }
 
-        Room updatedRoom = roomRepository.save(room);
-
-        if (previousStatus != RoomStatus.UNDER_REPAIR
-                && updatedRoom.getRoomStatus()
-                == RoomStatus.UNDER_REPAIR) {
-            notifyActiveAdmins(
-                    NotificationEventType.ROOM_UNDER_REPAIR,
-                    NotificationSeverity.WARNING,
-                    "Room placed under repair",
-                    roomDescription(updatedRoom)
-                            + " has been placed under repair.",
-                    updatedRoom,
-                    "ROOM_UNDER_REPAIR:"
-                            + updatedRoom.getRoomId()
-                            + ":"
-                            + System.currentTimeMillis()
-            );
+                roomRepository.delete(room);
         }
 
-        return mapToResponse(updatedRoom);
-    }
-
-    @Override
-    @Transactional
-    public void deleteRoom(Long roomId) {
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Room not found with id: " + roomId
-                        )
-                );
-
-        if (tenantRepository.countByRoomRoomId(roomId) > 0) {
-            throw new IllegalStateException(
-                    "Cannot delete room. Tenants are assigned to this room."
-            );
+        @Override
+        @Transactional(readOnly = true)
+        public List<RoomResponseDto> getRoomsByBuilding(Long buildingId) {
+                return roomRepository.findByBuildingBuildingId(buildingId)
+                                .stream()
+                                .map(this::mapToResponse)
+                                .toList();
         }
 
-        roomRepository.delete(room);
-    }
+        private RoomResponseDto mapToResponse(Room room) {
+                return RoomResponseDto.builder()
+                                .roomId(room.getRoomId())
+                                .buildingId(room.getBuilding().getBuildingId())
+                                .buildingName(room.getBuilding().getBuildingName())
+                                .roomNumber(room.getRoomNumber())
+                                .sharingType(room.getSharingType())
+                                .roomType(room.getRoomType())
+                                .capacity(getCapacity(room.getSharingType()))
+                                .roomStatus(room.getRoomStatus())
+                                .build();
+        }
 
-    @Override
-    @Transactional(readOnly = true)
-    public List<RoomResponseDto> getRoomsByBuilding(
-            Long buildingId
-    ) {
-        return roomRepository
-                .findByBuildingBuildingId(buildingId)
-                .stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    private void notifyActiveAdmins(
-            NotificationEventType eventType,
-            NotificationSeverity severity,
-            String title,
-            String message,
-            Room room,
-            String deduplicationKey
-    ) {
-        userRepository.findByRoleAndActiveTrue(UserRole.ADMIN)
-                .forEach(admin ->
-                        notificationService.createNotification(
-                                admin.getUserId(),
-                                eventType,
-                                severity,
-                                "ROOM",
-                                title,
-                                message,
-                                "/admin/rooms",
-                                "ROOM",
-                                room.getRoomId(),
-                                deduplicationKey
-                        )
-                );
-    }
-
-    private String roomDescription(Room room) {
-        return "Room " + room.getRoomNumber()
-                + " in "
-                + room.getBuilding().getBuildingName();
-    }
-
-    private RoomResponseDto mapToResponse(Room room) {
-        return RoomResponseDto.builder()
-                .roomId(room.getRoomId())
-                .buildingId(
-                        room.getBuilding().getBuildingId()
-                )
-                .buildingName(
-                        room.getBuilding().getBuildingName()
-                )
-                .roomNumber(room.getRoomNumber())
-                .sharingType(room.getSharingType())
-                .capacity(getCapacity(room.getSharingType()))
-                .roomStatus(room.getRoomStatus())
-                .build();
-    }
-
-    private Integer getCapacity(SharingType type) {
-        return switch (type) {
-            case SINGLE -> 1;
-            case DOUBLE -> 2;
-            case TRIPLE -> 3;
-            case FOUR -> 4;
-        };
-    }
+        private Integer getCapacity(SharingType sharingType) {
+                return switch (sharingType) {
+                        case SINGLE -> 1;
+                        case DOUBLE -> 2;
+                        case TRIPLE -> 3;
+                        case FOUR -> 4;
+                };
+        }
 }

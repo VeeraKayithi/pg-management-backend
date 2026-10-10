@@ -1,19 +1,15 @@
 package com.pgcompliance.service.impl;
 
-import com.pgcompliance.constant.NotificationEventType;
-import com.pgcompliance.constant.NotificationSeverity;
 import com.pgcompliance.constant.TenantStatus;
 import com.pgcompliance.constant.UserRole;
 import com.pgcompliance.dto.TenantAccountRequestDto;
 import com.pgcompliance.dto.TenantAccountResponseDto;
-import com.pgcompliance.entity.Room;
 import com.pgcompliance.entity.Tenant;
 import com.pgcompliance.entity.User;
 import com.pgcompliance.exception.ResourceNotFoundException;
 import com.pgcompliance.repository.TenantRepository;
 import com.pgcompliance.repository.UserRepository;
 import com.pgcompliance.service.AccountActivationService;
-import com.pgcompliance.service.NotificationService;
 import com.pgcompliance.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,7 +28,6 @@ public class UserServiceImpl implements UserService {
 
   private final PasswordEncoder passwordEncoder;
 
-  private final NotificationService notificationService;
 
   private final AccountActivationService accountActivationService;
 
