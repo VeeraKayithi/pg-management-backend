@@ -49,6 +49,18 @@ public class SecurityConfig {
                                                 .permitAll()
 
                                                 /*
+                                                 * Legacy registration endpoint.
+                                                 *
+                                                 * Super Admin only.
+                                                 *
+                                                 * This will eventually be replaced by the
+                                                 * dedicated Staff Account Management API.
+                                                 */
+                                                .requestMatchers(
+                                                                "/api/v1/auth/register")
+                                                .hasRole("ADMIN")
+
+                                                /*
                                                  * Public Tenant account activation
                                                  */
                                                 .requestMatchers(

@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
@@ -13,14 +14,15 @@ import java.util.Date;
 @Component
 public class JwtTokenProvider {
 
-  private static final String SECRET_KEY = "pg-compliance-management-secret-key-for-jwt-authentication-2026";
+  @Value("${app.jwt.secret}")
+  private String secretKey;;
 
   private static final long TOKEN_VALIDITY = 24 * 60 * 60 * 1000L;
 
   private Key getSigningKey() {
 
     return Keys.hmacShaKeyFor(
-        SECRET_KEY.getBytes(StandardCharsets.UTF_8));
+        secretKey.getBytes(StandardCharsets.UTF_8));
   }
 
   public String generateToken(User user) {

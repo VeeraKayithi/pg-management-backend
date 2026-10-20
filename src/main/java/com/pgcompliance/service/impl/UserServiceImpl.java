@@ -2,19 +2,29 @@ package com.pgcompliance.service.impl;
 
 import com.pgcompliance.constant.TenantStatus;
 import com.pgcompliance.constant.UserRole;
+import com.pgcompliance.dto.StaffAccountRequestDto;
+import com.pgcompliance.dto.StaffAccountResponseDto;
 import com.pgcompliance.dto.TenantAccountRequestDto;
 import com.pgcompliance.dto.TenantAccountResponseDto;
+import com.pgcompliance.entity.Building;
 import com.pgcompliance.entity.Tenant;
 import com.pgcompliance.entity.User;
 import com.pgcompliance.exception.ResourceNotFoundException;
+import com.pgcompliance.repository.BuildingRepository;
 import com.pgcompliance.repository.TenantRepository;
 import com.pgcompliance.repository.UserRepository;
 import com.pgcompliance.service.AccountActivationService;
+import com.pgcompliance.service.BuildingAccessService;
 import com.pgcompliance.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+
+import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
+import java.util.List;
 
 import java.util.UUID;
 
@@ -22,185 +32,338 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
-  private final UserRepository userRepository;
+        private final UserRepository userRepository;
 
-  private final TenantRepository tenantRepository;
+        private final TenantRepository tenantRepository;
 
-  private final PasswordEncoder passwordEncoder;
+        private final PasswordEncoder passwordEncoder;
 
+        private final BuildingRepository buildingRepository;
 
-  private final AccountActivationService accountActivationService;
+        private final BuildingAccessService buildingAccessService;
 
-  @Override
-  @Transactional
-  public TenantAccountResponseDto createTenantAccount(
-      TenantAccountRequestDto request) {
+        private final AccountActivationService accountActivationService;
 
-    Tenant tenant = tenantRepository
-        .findById(request.getTenantId())
-        .orElseThrow(() -> new ResourceNotFoundException(
-            "Tenant not found with id: "
-                + request.getTenantId()));
+        @Override
+        @Transactional
+        public TenantAccountResponseDto createTenantAccount(
+                        TenantAccountRequestDto request) {
 
-    validateTenantForAccountCreation(tenant);
+                Tenant tenant = tenantRepository
+                                .findById(request.getTenantId())
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Tenant not found with id: "
+                                                                + request.getTenantId()));
 
-    String normalizedUsername = normalizeUsername(request.getUsername());
+                validateTenantForAccountCreation(tenant);
 
-    validateUsernameAvailability(
-        normalizedUsername);
+                String normalizedUsername = normalizeUsername(request.getUsername());
 
-    User user = User.builder()
-        .username(normalizedUsername)
+                validateUsernameAvailability(
+                                normalizedUsername);
 
-        /*
-         * The Admin no longer enters a temporary
-         * password.
-         *
-         * A random value is encoded and stored as an
-         * unusable placeholder until the Tenant opens
-         * the activation link and creates a private
-         * password.
-         */
-        .password(generateUnusablePassword())
+                User user = User.builder()
+                                .username(normalizedUsername)
 
-        .role(UserRole.TENANT)
+                                /*
+                                 * The Admin no longer enters a temporary
+                                 * password.
+                                 *
+                                 * A random value is encoded and stored as an
+                                 * unusable placeholder until the Tenant opens
+                                 * the activation link and creates a private
+                                 * password.
+                                 */
+                                .password(generateUnusablePassword())
 
-        /*
-         * The Tenant cannot log in until email
-         * activation is completed.
-         */
-        .active(false)
+                                .role(UserRole.TENANT)
 
-        .emailVerified(false)
+                                /*
+                                 * The Tenant cannot log in until email
+                                 * activation is completed.
+                                 */
+                                .active(false)
 
-        .passwordChangeRequired(true)
+                                .emailVerified(false)
 
-        .tenant(tenant)
+                                .passwordChangeRequired(true)
 
-        .build();
+                                .tenant(tenant)
 
-    User savedUser = userRepository.saveAndFlush(user);
+                                .build();
 
-    /*
-     * Generates a secure activation token, stores its
-     * hash, and sends the activation link to the email
-     * address stored on the linked Tenant.
-     */
-    accountActivationService.createAndSendActivation(
-        savedUser.getUsername());
+                User savedUser = userRepository.saveAndFlush(user);
 
-    return TenantAccountResponseDto.builder()
-        .userId(savedUser.getUserId())
-        .tenantId(tenant.getTenantId())
-        .tenantName(tenant.getName())
-        .username(savedUser.getUsername())
-        .role(savedUser.getRole().name())
-        .active(savedUser.getActive())
-        .message(
-            "Tenant portal account created. "
-                + "An activation email was sent to "
-                + maskEmail(tenant.getEmail()))
-        .build();
-  }
+                /*
+                 * Generates a secure activation token, stores its
+                 * hash, and sends the activation link to the email
+                 * address stored on the linked Tenant.
+                 */
+                accountActivationService.createAndSendActivation(
+                                savedUser.getUsername());
 
-  private void validateTenantForAccountCreation(
-      Tenant tenant) {
+                return TenantAccountResponseDto.builder()
+                                .userId(savedUser.getUserId())
+                                .tenantId(tenant.getTenantId())
+                                .tenantName(tenant.getName())
+                                .username(savedUser.getUsername())
+                                .role(savedUser.getRole().name())
+                                .active(savedUser.getActive())
+                                .message(
+                                                "Tenant portal account created. "
+                                                                + "An activation email was sent to "
+                                                                + maskEmail(tenant.getEmail()))
+                                .build();
+        }
 
-    if (tenant.getTenantStatus() != TenantStatus.ACTIVE) {
+        private void validateTenantForAccountCreation(
+                        Tenant tenant) {
 
-      throw new IllegalStateException(
-          "Login account can be created only for an ACTIVE tenant");
-    }
+                if (tenant.getTenantStatus() != TenantStatus.ACTIVE) {
 
-    if (userRepository.existsByTenantTenantId(
-        tenant.getTenantId())) {
+                        throw new IllegalStateException(
+                                        "Login account can be created only for an ACTIVE tenant");
+                }
 
-      throw new IllegalStateException(
-          "A login account already exists for this tenant");
-    }
+                if (userRepository.existsByTenantTenantId(
+                                tenant.getTenantId())) {
 
-    if (tenant.getEmail() == null
-        || tenant.getEmail().isBlank()) {
+                        throw new IllegalStateException(
+                                        "A login account already exists for this tenant");
+                }
 
-      throw new IllegalStateException(
-          "A valid Tenant email address is required "
-              + "before creating a portal account");
-    }
-  }
+                if (tenant.getEmail() == null
+                                || tenant.getEmail().isBlank()) {
 
-  private void validateUsernameAvailability(
-      String username) {
+                        throw new IllegalStateException(
+                                        "A valid Tenant email address is required "
+                                                        + "before creating a portal account");
+                }
+        }
 
-    if (username.length() < 4
-        || username.length() > 100) {
+        private void validateUsernameAvailability(
+                        String username) {
 
-      throw new IllegalStateException(
-          "Username must contain between 4 and 100 characters");
-    }
+                if (username.length() < 4
+                                || username.length() > 100) {
 
-    if (userRepository.existsByUsername(
-        username)) {
+                        throw new IllegalStateException(
+                                        "Username must contain between 4 and 100 characters");
+                }
 
-      throw new IllegalStateException(
-          "Username already exists");
-    }
-  }
+                if (userRepository.existsByUsername(
+                                username)) {
 
-  private String normalizeUsername(
-      String username) {
+                        throw new IllegalStateException(
+                                        "Username already exists");
+                }
+        }
 
-    if (username == null
-        || username.isBlank()) {
+        private String normalizeUsername(
+                        String username) {
 
-      throw new IllegalStateException(
-          "Username is required");
-    }
+                if (username == null
+                                || username.isBlank()) {
 
-    return username
-        .trim()
-        .toLowerCase();
-  }
+                        throw new IllegalStateException(
+                                        "Username is required");
+                }
 
-  private String generateUnusablePassword() {
+                return username
+                                .trim()
+                                .toLowerCase();
+        }
 
-    /*
-     * UUID creates an unpredictable placeholder.
-     *
-     * BCrypt encodes it before storage. The raw value
-     * is never returned, displayed, emailed, or sent
-     * to the Tenant.
-     */
-    String randomPlaceholder = UUID.randomUUID().toString();
+        private String generateUnusablePassword() {
 
-    return passwordEncoder.encode(
-        randomPlaceholder);
-  }
+                /*
+                 * UUID creates an unpredictable placeholder.
+                 *
+                 * BCrypt encodes it before storage. The raw value
+                 * is never returned, displayed, emailed, or sent
+                 * to the Tenant.
+                 */
+                String randomPlaceholder = UUID.randomUUID().toString();
 
-  private String maskEmail(
-      String email) {
+                return passwordEncoder.encode(
+                                randomPlaceholder);
+        }
 
-    if (email == null
-        || email.isBlank()
-        || !email.contains("@")) {
+        private String maskEmail(
+                        String email) {
 
-      return "the registered email address";
-    }
+                if (email == null
+                                || email.isBlank()
+                                || !email.contains("@")) {
 
-    String[] parts = email.split("@", 2);
+                        return "the registered email address";
+                }
 
-    String localPart = parts[0];
+                String[] parts = email.split("@", 2);
 
-    String domain = parts[1];
+                String localPart = parts[0];
 
-    if (localPart.length() <= 2) {
+                String domain = parts[1];
 
-      return localPart.charAt(0)
-          + "***@"
-          + domain;
-    }
+                if (localPart.length() <= 2) {
 
-    return localPart.substring(0, 2)
-        + "***@"
-        + domain;
-  }
+                        return localPart.charAt(0)
+                                        + "***@"
+                                        + domain;
+                }
+
+                return localPart.substring(0, 2)
+                                + "***@"
+                                + domain;
+        }
+
+        private void validateStaffRole(UserRole role) {
+
+                if (role != UserRole.BUILDING_ADMIN
+                                && role != UserRole.SUPERVISOR) {
+
+                        throw new IllegalStateException(
+                                        "Staff role must be BUILDING_ADMIN or SUPERVISOR");
+                }
+        }
+
+        private void validateStaffPassword(
+                        String password) {
+
+                if (password == null
+                                || password.isBlank()) {
+
+                        throw new IllegalStateException(
+                                        "Password is required");
+                }
+
+                if (password.length() < 8) {
+
+                        throw new IllegalStateException(
+                                        "Password must contain at least 8 characters");
+                }
+
+                if (password
+                                .getBytes(StandardCharsets.UTF_8).length > 72) {
+
+                        throw new IllegalStateException(
+                                        "Password is too long");
+                }
+        }
+
+        @Override
+        @Transactional
+        public StaffAccountResponseDto createStaffAccount(
+                        StaffAccountRequestDto request) {
+
+                buildingAccessService.validateSuperAdminAccess();
+
+                validateStaffRole(request.getRole());
+
+                String normalizedUsername = normalizeUsername(request.getUsername());
+
+                validateUsernameAvailability(
+                                normalizedUsername);
+
+                validateStaffPassword(
+                                request.getPassword());
+
+                Building building = buildingRepository
+                                .findById(request.getBuildingId())
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Building not found with id: "
+                                                                + request.getBuildingId()));
+
+                User user = User.builder()
+                                .username(normalizedUsername)
+                                .password(
+                                                passwordEncoder.encode(
+                                                                request.getPassword()))
+                                .role(request.getRole())
+                                .active(true)
+
+                                /*
+                                 * Staff accounts do not use the
+                                 * Tenant email-activation workflow.
+                                 */
+                                .emailVerified(true)
+                                .passwordChangeRequired(false)
+
+                                .building(building)
+                                .tenant(null)
+                                .build();
+
+                User savedUser = userRepository.saveAndFlush(user);
+
+                return mapToStaffAccountResponse(savedUser);
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public List<StaffAccountResponseDto> getStaffAccounts() {
+
+                buildingAccessService.validateSuperAdminAccess();
+
+                return userRepository
+                                .findByRoleIn(
+                                                List.of(
+                                                                UserRole.BUILDING_ADMIN,
+                                                                UserRole.SUPERVISOR))
+                                .stream()
+                                .sorted(
+                                                Comparator
+                                                                .comparing(
+                                                                                (User user) -> user.getBuilding()
+                                                                                                .getBuildingName(),
+                                                                                String.CASE_INSENSITIVE_ORDER)
+                                                                .thenComparing(
+                                                                                User::getUsername,
+                                                                                String.CASE_INSENSITIVE_ORDER))
+                                .map(this::mapToStaffAccountResponse)
+                                .toList();
+        }
+
+        @Override
+        @Transactional
+        public StaffAccountResponseDto updateStaffAccountStatus(
+                        Long userId,
+                        Boolean active) {
+
+                buildingAccessService.validateSuperAdminAccess();
+
+                User user = userRepository
+                                .findById(userId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "User not found with id: "
+                                                                + userId));
+
+                validateStaffRole(user.getRole());
+
+                user.setActive(active);
+
+                User savedUser = userRepository.saveAndFlush(user);
+
+                return mapToStaffAccountResponse(savedUser);
+        }
+
+        private StaffAccountResponseDto mapToStaffAccountResponse(
+                        User user) {
+
+                Building building = user.getBuilding();
+
+                return StaffAccountResponseDto.builder()
+                                .userId(user.getUserId())
+                                .username(user.getUsername())
+                                .role(user.getRole().name())
+                                .active(user.getActive())
+                                .buildingId(
+                                                building != null
+                                                                ? building.getBuildingId()
+                                                                : null)
+                                .buildingName(
+                                                building != null
+                                                                ? building.getBuildingName()
+                                                                : null)
+                                .build();
+        }
 }

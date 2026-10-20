@@ -15,62 +15,68 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl
-    implements AuthService {
+        implements AuthService {
 
-  private final UserRepository userRepository;
+    private final UserRepository userRepository;
 
-  private final PasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
 
-  private final JwtTokenProvider jwtTokenProvider;
+    private final JwtTokenProvider jwtTokenProvider;
 
-  @Override
-  public String register(
-      RegisterRequestDto request) {
+    @Override
+    public String register(
+            RegisterRequestDto request) {
 
-    if (userRepository.existsByUsername(
-        request.getUsername())) {
+        if (userRepository.existsByUsername(
+                request.getUsername())) {
 
-      throw new RuntimeException(
-          "Username already exists");
+            throw new RuntimeException(
+                    "Username already exists");
+        }
+
+        User user = User.builder()
+                .username(request.getUsername())
+                .password(
+                        passwordEncoder.encode(
+                                request.getPassword()))
+                .role(request.getRole())
+                .active(true)
+                .build();
+
+        userRepository.save(user);
+
+        return "User registered successfully";
     }
 
-    User user = User.builder()
-        .username(request.getUsername())
-        .password(
-            passwordEncoder.encode(
-                request.getPassword()))
-        .role(request.getRole())
-        .active(true)
-        .build();
+    @Override
+    public LoginResponseDto login(
+            LoginRequestDto request) {
 
-    userRepository.save(user);
+        User user = userRepository.findByUsername(
+                request.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "User not found"));
 
-    return "User registered successfully";
-  }
+        if (!passwordEncoder.matches(
+                request.getPassword(),
+                user.getPassword())) {
 
-  @Override
-  public LoginResponseDto login(
-      LoginRequestDto request) {
+            throw new RuntimeException(
+                    "Invalid credentials");
+        }
 
-    User user = userRepository.findByUsername(
-        request.getUsername())
-        .orElseThrow(() -> new ResourceNotFoundException(
-            "User not found"));
+        if (!Boolean.TRUE.equals(user.getActive())) {
 
-    if (!passwordEncoder.matches(
-        request.getPassword(),
-        user.getPassword())) {
+            throw new IllegalStateException(
+                    "Account is inactive");
+        }
 
-      throw new RuntimeException(
-          "Invalid credentials");
+        String token = jwtTokenProvider.generateToken(user);
+
+        return LoginResponseDto.builder()
+                .token(token)
+                .username(user.getUsername())
+                .role(user.getRole().name())
+                .build();
     }
-
-    String token = jwtTokenProvider.generateToken(user);
-
-    return LoginResponseDto.builder()
-        .token(token)
-        .username(user.getUsername())
-        .role(user.getRole().name())
-        .build();
-  }
 }

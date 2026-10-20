@@ -19,4 +19,6 @@ public interface UserRepository
     Optional<User> findByTenantTenantId(Long tenantId);
 
     List<User> findByRoleAndActiveTrue(UserRole role);
+
+    List<User> findByRoleIn(List<UserRole> roles);
 }
