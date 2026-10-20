@@ -36,6 +36,10 @@ public class User {
     @Column(nullable = false)
     private Boolean passwordChangeRequired;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "building_id")
+    private Building building;
+
     @OneToOne
     @JoinColumn(name = "tenant_id", unique = true)
     private Tenant tenant;

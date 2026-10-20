@@ -19,7 +19,7 @@ import com.pgcompliance.exception.ResourceNotFoundException;
 import com.pgcompliance.repository.RoomRepository;
 import com.pgcompliance.repository.TenantRepository;
 import com.pgcompliance.repository.UserRepository;
-
+import com.pgcompliance.service.BuildingAccessService;
 import com.pgcompliance.service.NotificationService;
 import com.pgcompliance.service.TenantService;
 
@@ -43,6 +43,8 @@ public class TenantServiceImpl implements TenantService {
         private final UserRepository userRepository;
 
         private final NotificationService notificationService;
+
+        private final BuildingAccessService buildingAccessService;
 
         @Override
         @Transactional
@@ -72,6 +74,11 @@ public class TenantServiceImpl implements TenantService {
 
                 Room requestedRoom = findRoom(request.getRoomId());
 
+                buildingAccessService.validateWriteAccess(
+                                requestedRoom
+                                                .getBuilding()
+                                                .getBuildingId());
+
                 validateRoomForAssignment(
                                 requestedRoom,
                                 null);
@@ -90,6 +97,17 @@ public class TenantServiceImpl implements TenantService {
                 if (existingTenantByMobile.isPresent()) {
 
                         Tenant existingTenant = existingTenantByMobile.get();
+
+                        if (existingTenant.getRoom() == null) {
+                                throw new IllegalStateException(
+                                                "Existing tenant does not have an assigned room");
+                        }
+
+                        buildingAccessService.validateWriteAccess(
+                                        existingTenant
+                                                        .getRoom()
+                                                        .getBuilding()
+                                                        .getBuildingId());
 
                         if (existingTenant.getTenantStatus() == TenantStatus.ACTIVE) {
 
@@ -198,11 +216,33 @@ public class TenantServiceImpl implements TenantService {
         @Transactional(readOnly = true)
         public List<TenantResponseDto> getAllTenants() {
 
+                /*
+                 * Super Admin can see tenants
+                 * from every building.
+                 */
+                if (buildingAccessService.isSuperAdmin()) {
+
+                        return tenantRepository
+                                        .findAll()
+                                        .stream()
+                                        .map(this::mapToResponse)
+                                        .toList();
+                }
+
+                /*
+                 * BUILDING_ADMIN and SUPERVISOR
+                 * can see only tenants belonging
+                 * to their assigned building.
+                 */
+                Long buildingId = buildingAccessService.getAccessibleBuildingId();
+
+                buildingAccessService.validateReadAccess(
+                                buildingId);
+
                 return tenantRepository
-                                .findAll()
+                                .findByRoomBuildingBuildingId(buildingId)
                                 .stream()
-                                .map(
-                                                this::mapToResponse)
+                                .map(this::mapToResponse)
                                 .toList();
         }
 
@@ -211,11 +251,19 @@ public class TenantServiceImpl implements TenantService {
         public TenantResponseDto getTenantById(
                         Long tenantId) {
 
-                Tenant tenant = findTenant(
-                                tenantId);
+                Tenant tenant = findTenant(tenantId);
 
-                return mapToResponse(
-                                tenant);
+                if (tenant.getRoom() == null) {
+                        throw new IllegalStateException(
+                                        "Tenant does not have an assigned room");
+                }
+
+                buildingAccessService.validateReadAccess(
+                                tenant.getRoom()
+                                                .getBuilding()
+                                                .getBuildingId());
+
+                return mapToResponse(tenant);
         }
 
         @Override
@@ -226,6 +274,16 @@ public class TenantServiceImpl implements TenantService {
 
                 Tenant tenant = findTenant(
                                 tenantId);
+
+                if (tenant.getRoom() == null) {
+                        throw new IllegalStateException(
+                                        "Tenant does not have an assigned room");
+                }
+
+                buildingAccessService.validateWriteAccess(
+                                tenant.getRoom()
+                                                .getBuilding()
+                                                .getBuildingId());
 
                 String normalizedName = normalizeName(
                                 request.getName());
@@ -248,6 +306,11 @@ public class TenantServiceImpl implements TenantService {
 
                 Room requestedRoom = findRoom(
                                 request.getRoomId());
+
+                buildingAccessService.validateWriteAccess(
+                                requestedRoom
+                                                .getBuilding()
+                                                .getBuildingId());
 
                 boolean roomChanged = oldRoom == null
                                 || !oldRoom
@@ -318,6 +381,16 @@ public class TenantServiceImpl implements TenantService {
 
                 Tenant tenant = findTenant(
                                 tenantId);
+
+                if (tenant.getRoom() == null) {
+                        throw new IllegalStateException(
+                                        "Tenant does not have an assigned room");
+                }
+
+                buildingAccessService.validateWriteAccess(
+                                tenant.getRoom()
+                                                .getBuilding()
+                                                .getBuildingId());
 
                 if (tenant.getTenantStatus() == TenantStatus.LEFT) {
 

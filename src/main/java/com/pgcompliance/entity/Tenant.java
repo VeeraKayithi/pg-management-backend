@@ -1,5 +1,6 @@
 package com.pgcompliance.entity;
 
+import com.pgcompliance.constant.BillingCycleType;
 import com.pgcompliance.constant.TenantStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -41,6 +42,10 @@ public class Tenant {
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
   private TenantStatus tenantStatus;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "billing_cycle_type")
+  private BillingCycleType billingCycleType;
 
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "room_id")
