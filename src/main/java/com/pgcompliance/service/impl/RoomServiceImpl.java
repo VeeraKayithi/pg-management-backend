@@ -133,7 +133,7 @@ public class RoomServiceImpl implements RoomService {
                         RoomRequestDto request) {
 
                 Room room = roomRepository
-                                .findById(roomId)
+                                .findByIdForUpdate(roomId)
                                 .orElseThrow(() -> new ResourceNotFoundException(
                                                 "Room not found with id: "
                                                                 + roomId));
@@ -186,6 +186,19 @@ public class RoomServiceImpl implements RoomService {
                 room.setRoomNumber(
                                 request.getRoomNumber());
 
+                int requestedCapacity = switch (request.getSharingType()) {
+                        case SINGLE -> 1;
+                        case DOUBLE -> 2;
+                        case TRIPLE -> 3;
+                        case FOUR -> 4;
+                };
+                long activeResidents = tenantRepository.countByRoomRoomIdAndTenantStatus(
+                                roomId, com.pgcompliance.constant.TenantStatus.ACTIVE);
+                if (activeResidents > requestedCapacity) {
+                        throw new IllegalStateException(
+                                        "Cannot reduce room capacity below active occupancy");
+                }
+
                 room.setSharingType(
                                 request.getSharingType());
 
@@ -204,7 +217,7 @@ public class RoomServiceImpl implements RoomService {
         public void deleteRoom(Long roomId) {
 
                 Room room = roomRepository
-                                .findById(roomId)
+                                .findByIdForUpdate(roomId)
                                 .orElseThrow(() -> new ResourceNotFoundException(
                                                 "Room not found with id: "
                                                                 + roomId));

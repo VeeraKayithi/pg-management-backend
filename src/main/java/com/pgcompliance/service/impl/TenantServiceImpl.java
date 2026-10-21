@@ -72,20 +72,23 @@ public class TenantServiceImpl implements TenantService {
                                         "A tenant already exists with this email address");
                 }
 
-                Room requestedRoom = findRoom(request.getRoomId());
+                // Lock the returning tenant first, before any room rows.
+                // Every tenant mutation follows tenant -> room(s) lock order.
+                Optional<Tenant> existingTenantByMobile = tenantRepository
+                                .findByMobileNumberForUpdate(normalizedMobileNumber);
+
+                Long previousRoomId = existingTenantByMobile
+                                .map(Tenant::getRoom)
+                                .map(Room::getRoomId)
+                                .orElse(null);
+                List<Room> lockedRooms = lockRoomsInIdOrder(
+                                previousRoomId, request.getRoomId());
+                Room requestedRoom = lockedRoom(lockedRooms, request.getRoomId());
 
                 buildingAccessService.validateWriteAccess(
-                                requestedRoom
-                                                .getBuilding()
-                                                .getBuildingId());
+                                requestedRoom.getBuilding().getBuildingId());
 
-                validateRoomForAssignment(
-                                requestedRoom,
-                                null);
-
-                Optional<Tenant> existingTenantByMobile = tenantRepository
-                                .findByMobileNumber(
-                                                normalizedMobileNumber);
+                validateRoomForAssignment(requestedRoom, null);
 
                 /*
                  * Returning Tenant workflow.
@@ -119,7 +122,8 @@ public class TenantServiceImpl implements TenantService {
                                         normalizedEmail,
                                         existingTenant.getTenantId());
 
-                        Room previousRoom = existingTenant.getRoom();
+                        Room previousRoom = previousRoomId == null
+                                        ? null : lockedRoom(lockedRooms, previousRoomId);
 
                         existingTenant.setName(
                                         normalizedName);
@@ -272,7 +276,7 @@ public class TenantServiceImpl implements TenantService {
                         Long tenantId,
                         TenantRequestDto request) {
 
-                Tenant tenant = findTenant(
+                Tenant tenant = findTenantForUpdate(
                                 tenantId);
 
                 if (tenant.getRoom() == null) {
@@ -302,10 +306,10 @@ public class TenantServiceImpl implements TenantService {
                                 normalizedEmail,
                                 tenantId);
 
-                Room oldRoom = tenant.getRoom();
-
-                Room requestedRoom = findRoom(
-                                request.getRoomId());
+                Long oldRoomId = tenant.getRoom().getRoomId();
+                List<Room> lockedRooms = lockRoomsInIdOrder(oldRoomId, request.getRoomId());
+                Room oldRoom = lockedRoom(lockedRooms, oldRoomId);
+                Room requestedRoom = lockedRoom(lockedRooms, request.getRoomId());
 
                 buildingAccessService.validateWriteAccess(
                                 requestedRoom
@@ -379,7 +383,7 @@ public class TenantServiceImpl implements TenantService {
         public void markTenantAsLeft(
                         Long tenantId) {
 
-                Tenant tenant = findTenant(
+                Tenant tenant = findTenantForUpdate(
                                 tenantId);
 
                 if (tenant.getRoom() == null) {
@@ -398,7 +402,7 @@ public class TenantServiceImpl implements TenantService {
                                         "Tenant is already marked as LEFT");
                 }
 
-                Room assignedRoom = tenant.getRoom();
+                Room assignedRoom = findRoom(tenant.getRoom().getRoomId());
 
                 tenant.setTenantStatus(
                                 TenantStatus.LEFT);
@@ -498,11 +502,37 @@ public class TenantServiceImpl implements TenantService {
                                                                                 + tenantId));
         }
 
+        // Lock tenant rows first; concurrent edits/departures cannot race.
+        private Tenant findTenantForUpdate(Long tenantId) {
+                return tenantRepository.findByIdForUpdate(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Tenant not found with id: " + tenantId));
+        }
+
+        // Lock all affected room rows in ascending ID order to avoid
+        // deadlocks during simultaneous transfers in opposite directions.
+        private List<Room> lockRoomsInIdOrder(Long sourceId, Long destinationId) {
+                java.util.TreeSet<Long> ids = new java.util.TreeSet<>();
+                if (sourceId != null) ids.add(sourceId);
+                if (destinationId != null) ids.add(destinationId);
+                List<Room> locked = new java.util.ArrayList<>();
+                for (Long id : ids) locked.add(findRoom(id));
+                return locked;
+        }
+
+        private Room lockedRoom(List<Room> rooms, Long roomId) {
+                return rooms.stream()
+                                .filter(room -> room.getRoomId().equals(roomId))
+                                .findFirst()
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Room not found with id: " + roomId));
+        }
+
         private Room findRoom(
                         Long roomId) {
 
                 return roomRepository
-                                .findById(
+                                .findByIdForUpdate(
                                                 roomId)
                                 .orElseThrow(
                                                 () -> new ResourceNotFoundException(
