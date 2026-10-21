@@ -12,12 +12,16 @@ import com.pgcompliance.dto.TenantResponseDto;
 
 import com.pgcompliance.entity.Room;
 import com.pgcompliance.entity.Tenant;
+import com.pgcompliance.entity.TenantStay;
+import com.pgcompliance.entity.RoomTransferHistory;
 import com.pgcompliance.entity.User;
 
 import com.pgcompliance.exception.ResourceNotFoundException;
 
 import com.pgcompliance.repository.RoomRepository;
 import com.pgcompliance.repository.TenantRepository;
+import com.pgcompliance.repository.TenantStayRepository;
+import com.pgcompliance.repository.RoomTransferHistoryRepository;
 import com.pgcompliance.repository.UserRepository;
 import com.pgcompliance.service.BuildingAccessService;
 import com.pgcompliance.service.NotificationService;
@@ -37,6 +41,8 @@ import java.util.Optional;
 public class TenantServiceImpl implements TenantService {
 
         private final TenantRepository tenantRepository;
+        private final TenantStayRepository tenantStayRepository;
+        private final RoomTransferHistoryRepository roomTransferHistoryRepository;
 
         private final RoomRepository roomRepository;
 
@@ -153,6 +159,7 @@ public class TenantServiceImpl implements TenantService {
 
                         Tenant reactivatedTenant = tenantRepository.saveAndFlush(
                                         existingTenant);
+                        createActiveStay(reactivatedTenant, requestedRoom);
 
                         if (previousRoom != null
                                         && !previousRoom
@@ -200,6 +207,7 @@ public class TenantServiceImpl implements TenantService {
 
                 Tenant savedTenant = tenantRepository.saveAndFlush(
                                 tenant);
+                createActiveStay(savedTenant, requestedRoom);
 
                 synchronizeRoomStatus(
                                 requestedRoom);
@@ -355,6 +363,20 @@ public class TenantServiceImpl implements TenantService {
 
                 Tenant updatedTenant = tenantRepository.saveAndFlush(
                                 tenant);
+                if (updatedTenant.getTenantStatus() == TenantStatus.ACTIVE) {
+                        TenantStay activeStay = requireActiveStay(updatedTenant.getTenantId());
+                        activeStay.setJoiningDate(updatedTenant.getJoiningDate());
+                        if (roomChanged) {
+                                roomTransferHistoryRepository.save(RoomTransferHistory.builder()
+                                                .stay(activeStay)
+                                                .fromRoom(oldRoom)
+                                                .toRoom(requestedRoom)
+                                                .transferredAt(LocalDateTime.now())
+                                                .build());
+                                activeStay.setRoom(requestedRoom);
+                        }
+                        tenantStayRepository.save(activeStay);
+                }
 
                 if (roomChanged
                                 && oldRoom != null) {
@@ -412,6 +434,11 @@ public class TenantServiceImpl implements TenantService {
                  */
                 tenantRepository.saveAndFlush(
                                 tenant);
+                TenantStay activeStay = requireActiveStay(tenant.getTenantId());
+                activeStay.setStayStatus(TenantStay.StayStatus.COMPLETED);
+                // This API does not collect an actual checkout date. Do not fabricate one.
+                activeStay.setLeavingDate(null);
+                tenantStayRepository.save(activeStay);
 
                 if (assignedRoom != null) {
 
@@ -488,6 +515,28 @@ public class TenantServiceImpl implements TenantService {
                                                                 ? null
                                                                 : room.getRoomType().name())
                                 .build();
+        }
+
+        private TenantStay requireActiveStay(Long tenantId) {
+                return tenantStayRepository
+                                .findByTenantTenantIdAndStayStatus(tenantId, TenantStay.StayStatus.ACTIVE)
+                                .orElseThrow(() -> new IllegalStateException(
+                                                "Active stay missing for tenant " + tenantId
+                                                                + ". Check A02 backfill before making changes."));
+        }
+
+        private void createActiveStay(Tenant tenant, Room room) {
+                if (tenantStayRepository.findByTenantTenantIdAndStayStatus(
+                                tenant.getTenantId(), TenantStay.StayStatus.ACTIVE).isPresent()) {
+                        throw new IllegalStateException("Tenant already has an active stay");
+                }
+                tenantStayRepository.save(TenantStay.builder()
+                                .tenant(tenant)
+                                .room(room)
+                                .joiningDate(tenant.getJoiningDate())
+                                .stayStatus(TenantStay.StayStatus.ACTIVE)
+                                .createdAt(LocalDateTime.now())
+                                .build());
         }
 
         private Tenant findTenant(
